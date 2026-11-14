@@ -5,7 +5,7 @@ import 'dotenv/config'
 import express, { json, urlencoded } from 'express'
 import mongoose from 'mongoose'
 import path from 'path'
-import { DB_ADDRESS, ORIGIN_ALLOW } from './config'
+import { DB_ADDRESS, ORIGIN_ALLOW, UPLOAD_PATH } from './config'
 import errorHandler from './middlewares/error-handler'
 import { apiLimiter } from './middlewares/rate-limit'
 import serveStatic from './middlewares/serverStatic'
@@ -20,7 +20,10 @@ app.set('trust proxy', 1)
 app.use(cors({ origin: ORIGIN_ALLOW, credentials: true }))
 app.use(cookieParser())
 
-app.use(serveStatic(path.join(__dirname, 'public')))
+app.use(
+    `/${UPLOAD_PATH}`,
+    serveStatic(path.join(__dirname, 'public', UPLOAD_PATH))
+)
 
 app.use(apiLimiter)
 app.use(urlencoded({ extended: false, limit: '100kb', parameterLimit: 50 }))
