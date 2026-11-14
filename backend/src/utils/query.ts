@@ -6,14 +6,15 @@ export const MAX_LIMIT = 10
 export const getPagination = (
     pageRaw: unknown,
     limitRaw: unknown,
-    defaultLimit = 10
+    defaultLimit = 10,
+    maxLimit = MAX_LIMIT
 ) => {
     const page = Math.min(
         1_000_000,
         Math.max(1, Math.floor(Number(pageRaw)) || 1)
     )
     const limit = Math.min(
-        MAX_LIMIT,
+        maxLimit,
         Math.max(1, Math.floor(Number(limitRaw)) || defaultLimit)
     )
     return { page, limit, skip: (page - 1) * limit }

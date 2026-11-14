@@ -2,30 +2,39 @@ import { NextFunction, Request, Response } from 'express'
 import { constants } from 'http2'
 import { Error as MongooseError } from 'mongoose'
 import { join } from 'path'
+import { UPLOAD_PATH, UPLOAD_PATH_TEMP } from '../config'
 import BadRequestError from '../errors/bad-request-error'
 import ConflictError from '../errors/conflict-error'
 import NotFoundError from '../errors/not-found-error'
 import Product from '../models/product'
 import movingFile from '../utils/movingFile'
+import { getPagination } from '../utils/query'
+import { sanitizeRichText, sanitizeText } from '../utils/sanitize'
+
+const TEMP_DIR = join(__dirname, '../public', UPLOAD_PATH_TEMP)
+const IMAGES_DIR = join(__dirname, '../public', UPLOAD_PATH)
 
 // GET /product
 const getProducts = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { page = 1, limit = 5 } = req.query
-        const options = {
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
-        }
-        const products = await Product.find({}, null, options)
+        const { page, limit, skip } = getPagination(
+            req.query.page,
+            req.query.limit,
+            5,
+            50
+        )
+        const products = await Product.find({}, null, { skip, limit })
         const totalProducts = await Product.countDocuments({})
-        const totalPages = Math.ceil(totalProducts / Number(limit))
+        const totalPages = Math.ceil(totalProducts / limit)
+        // Каталог запрашивают часто и меняется он редко - разрешаем кэш на минуту
+        res.set('Cache-Control', 'public, max-age=60')
         return res.send({
             items: products,
             pagination: {
                 totalProducts,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: page,
+                pageSize: limit,
             },
         })
     } catch (err) {
@@ -44,19 +53,15 @@ const createProduct = async (
 
         // Переносим картинку из временной папки
         if (image) {
-            movingFile(
-                image.fileName,
-                join(__dirname, `../public/${process.env.UPLOAD_PATH_TEMP}`),
-                join(__dirname, `../public/${process.env.UPLOAD_PATH}`)
-            )
+            movingFile(image.fileName, TEMP_DIR, IMAGES_DIR)
         }
 
         const product = await Product.create({
-            description,
+            description: sanitizeRichText(description),
             image,
-            category,
+            category: sanitizeText(category),
             price,
-            title,
+            title: sanitizeText(title),
         })
         return res.status(constants.HTTP_STATUS_CREATED).send(product)
     } catch (error) {
@@ -72,8 +77,7 @@ const createProduct = async (
     }
 }
 
-// TODO: Добавить guard admin
-// PUT /product
+// PATCH /product/:productId
 const updateProduct = async (
     req: Request,
     res: Response,
@@ -81,26 +85,25 @@ const updateProduct = async (
 ) => {
     try {
         const { productId } = req.params
-        const { image } = req.body
+        const { title, category, description, price, image } = req.body
 
         // Переносим картинку из временной папки
         if (image) {
-            movingFile(
-                image.fileName,
-                join(__dirname, `../public/${process.env.UPLOAD_PATH_TEMP}`),
-                join(__dirname, `../public/${process.env.UPLOAD_PATH}`)
-            )
+            movingFile(image.fileName, TEMP_DIR, IMAGES_DIR)
         }
+
+        const update: Record<string, unknown> = {}
+        if (title !== undefined) update.title = sanitizeText(title)
+        if (category !== undefined) update.category = sanitizeText(category)
+        if (description !== undefined) {
+            update.description = sanitizeRichText(description)
+        }
+        if (price !== undefined) update.price = price || null
+        if (image) update.image = image
 
         const product = await Product.findByIdAndUpdate(
             productId,
-            {
-                $set: {
-                    ...req.body,
-                    price: req.body.price ? req.body.price : null,
-                    image: req.body.image ? req.body.image : undefined,
-                },
-            },
+            { $set: update },
             { runValidators: true, new: true }
         ).orFail(() => new NotFoundError('Нет товара по заданному id'))
         return res.send(product)
@@ -120,8 +123,7 @@ const updateProduct = async (
     }
 }
 
-// TODO: Добавить guard admin
-// DELETE /product
+// DELETE /product/:productId
 const deleteProduct = async (
     req: Request,
     res: Response,
