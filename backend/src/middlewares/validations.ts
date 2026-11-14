@@ -116,23 +116,19 @@ export const validateUserBody = celebrate({
         password: Joi.string().min(6).max(72).required().messages({
             'string.empty': 'Поле "password" должно быть заполнено',
         }),
-        email: email()
-            .required()
-            .message('Поле "email" должно быть валидным email-адресом')
-            .messages({
-                'string.empty': 'Поле "email" должно быть заполнено',
-            }),
+        email: email().required().messages({
+            'string.empty': 'Поле "email" должно быть заполнено',
+            'string.email': 'Поле "email" должно быть валидным email-адресом',
+        }),
     }),
 })
 
 export const validateAuthentication = celebrate({
     body: Joi.object().keys({
-        email: email()
-            .required()
-            .message('Поле "email" должно быть валидным email-адресом')
-            .messages({
-                'string.required': 'Поле "email" должно быть заполнено',
-            }),
+        email: email().required().messages({
+            'string.empty': 'Поле "email" должно быть заполнено',
+            'string.email': 'Поле "email" должно быть валидным email-адресом',
+        }),
         password: Joi.string().required().max(72).messages({
             'string.empty': 'Поле "password" должно быть заполнено',
         }),
