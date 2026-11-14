@@ -148,3 +148,13 @@ export const validateProfileBody = celebrate({
         })
         .min(1),
 })
+
+export const validateOrderStatus = celebrate({
+    body: Joi.object()
+        .keys({
+            status: Joi.string()
+                .valid('new', 'delivering', 'completed', 'cancelled')
+                .required(),
+        })
+        .unknown(true),
+})
