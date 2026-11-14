@@ -9,6 +9,7 @@ import ConflictError from '../errors/conflict-error'
 import NotFoundError from '../errors/not-found-error'
 import UnauthorizedError from '../errors/unauthorized-error'
 import User from '../models/user'
+import { sanitizeText } from '../utils/sanitize'
 
 // POST /auth/login
 const login = async (req: Request, res: Response, next: NextFunction) => {
@@ -36,7 +37,11 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
 const register = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { email, password, name } = req.body
-        const newUser = new User({ email, password, name })
+        const newUser = new User({
+            email,
+            password,
+            name: typeof name === 'string' ? sanitizeText(name) : undefined,
+        })
         await newUser.save()
         const accessToken = newUser.generateAccessToken()
         const refreshToken = await newUser.generateRefreshToken()
@@ -164,25 +169,8 @@ const refreshAccessToken = async (
     }
 }
 
-const getCurrentUserRoles = async (
-    req: Request,
-    res: Response,
-    next: NextFunction
-) => {
-    const userId = res.locals.user._id
-    try {
-        await User.findById(userId, req.body, {
-            new: true,
-        }).orFail(
-            () =>
-                new NotFoundError(
-                    'Пользователь по заданному id отсутствует в базе'
-                )
-        )
-        res.status(200).json(res.locals.user.roles)
-    } catch (error) {
-        next(error)
-    }
+const getCurrentUserRoles = (_req: Request, res: Response) => {
+    res.status(200).json(res.locals.user.roles)
 }
 
 const updateCurrentUser = async (
@@ -192,8 +180,15 @@ const updateCurrentUser = async (
 ) => {
     const userId = res.locals.user._id
     try {
-        const updatedUser = await User.findByIdAndUpdate(userId, req.body, {
+        const { name, phone, email } = req.body
+        const update: { name?: string; phone?: string; email?: string } = {}
+        if (typeof name === 'string') update.name = sanitizeText(name)
+        if (typeof phone === 'string') update.phone = sanitizeText(phone)
+        if (typeof email === 'string') update.email = email
+
+        const updatedUser = await User.findByIdAndUpdate(userId, update, {
             new: true,
+            runValidators: true,
         }).orFail(
             () =>
                 new NotFoundError(

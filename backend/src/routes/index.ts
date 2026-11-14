@@ -7,9 +7,11 @@ import customerRouter from './customers'
 import orderRouter from './order'
 import productRouter from './product'
 import uploadRouter from './upload'
+import { csrfProtection } from '../middlewares/csrf'
 
 const router = Router()
 
+router.use(csrfProtection)
 router.use('/auth', authRouter)
 router.use('/product', productRouter)
 router.use('/order', auth, orderRouter)

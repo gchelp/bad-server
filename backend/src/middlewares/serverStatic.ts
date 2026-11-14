@@ -1,24 +1,45 @@
 import { NextFunction, Request, Response } from 'express'
 import fs from 'fs'
 import path from 'path'
+import BadRequestError from '../errors/bad-request-error'
 
 export default function serveStatic(baseDir: string) {
-    return (req: Request, res: Response, next: NextFunction) => {
-        // Определяем полный путь к запрашиваемому файлу
-        const filePath = path.join(baseDir, req.path)
+    const root = path.resolve(baseDir)
 
-        // Проверяем, существует ли файл
-        fs.access(filePath, fs.constants.F_OK, (err) => {
-            if (err) {
-                // Файл не существует отдаем дальше мидлварам
+    return (req: Request, res: Response, next: NextFunction) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+            return next()
+        }
+
+        let requestedPath: string
+        try {
+            requestedPath = decodeURIComponent(req.path)
+        } catch (_error) {
+            return next(new BadRequestError('Некорректный путь'))
+        }
+        if (requestedPath.includes('\0')) {
+            return next(new BadRequestError('Некорректный путь'))
+        }
+
+        // Итоговый путь обязан остаться внутри разрешённой папки
+        const filePath = path.resolve(root, `.${requestedPath}`)
+        if (!filePath.startsWith(root + path.sep)) {
+            return next()
+        }
+
+        return fs.stat(filePath, (statError, stats) => {
+            if (statError || !stats.isFile()) {
                 return next()
             }
-            // Файл существует, отправляем его клиенту
-            return res.sendFile(filePath, (err) => {
-                if (err) {
-                    next(err)
+            return res.sendFile(
+                filePath,
+                { dotfiles: 'deny', maxAge: '1d' },
+                (sendError) => {
+                    if (sendError) {
+                        next(sendError)
+                    }
                 }
-            })
+            )
         })
     }
 }

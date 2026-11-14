@@ -5,9 +5,20 @@ import NotFoundError from '../errors/not-found-error'
 import Order, { IOrder } from '../models/order'
 import Product, { IProduct } from '../models/product'
 import User from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
+import {
+    getPagination,
+    pickSortField,
+    queryDate,
+    queryNumber,
+    queryString,
+} from '../utils/query'
+import { sanitizeText } from '../utils/sanitize'
 
 // eslint-disable-next-line max-len
 // GET /orders?page=2&limit=5&sort=totalAmount&order=desc&orderDateFrom=2024-07-01&orderDateTo=2024-08-01&status=delivering&totalAmountFrom=100&totalAmountTo=1000&search=%2B1
+
+const ORDER_SORT_FIELDS = ['createdAt', 'totalAmount', 'orderNumber', 'status']
 
 export const getOrders = async (
     req: Request,
@@ -15,55 +26,59 @@ export const getOrders = async (
     next: NextFunction
 ) => {
     try {
-        const {
-            page = 1,
-            limit = 10,
-            sortField = 'createdAt',
-            sortOrder = 'desc',
-            status,
-            totalAmountFrom,
-            totalAmountTo,
-            orderDateFrom,
-            orderDateTo,
-            search,
-        } = req.query
+        const { page, limit, skip } = getPagination(
+            req.query.page,
+            req.query.limit
+        )
+        const sortField = pickSortField(req.query.sortField, ORDER_SORT_FIELDS)
+        const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1
+        const status = queryString(req.query.status, 'status', 30)
+        const totalAmountFrom = queryNumber(
+            req.query.totalAmountFrom,
+            'totalAmountFrom'
+        )
+        const totalAmountTo = queryNumber(
+            req.query.totalAmountTo,
+            'totalAmountTo'
+        )
+        const orderDateFrom = queryDate(
+            req.query.orderDateFrom,
+            'orderDateFrom'
+        )
+        const orderDateTo = queryDate(req.query.orderDateTo, 'orderDateTo')
+        const searchText = queryString(req.query.search, 'search')
 
         const filters: FilterQuery<Partial<IOrder>> = {}
 
         if (status) {
-            if (typeof status === 'object') {
-                Object.assign(filters, status)
-            }
-            if (typeof status === 'string') {
-                filters.status = status
+            filters.status = status
+        }
+
+        if (totalAmountFrom !== undefined) {
+            filters.totalAmount = {
+                ...filters.totalAmount,
+                $gte: totalAmountFrom,
             }
         }
 
-        if (totalAmountFrom) {
+        if (totalAmountTo !== undefined) {
             filters.totalAmount = {
                 ...filters.totalAmount,
-                $gte: Number(totalAmountFrom),
-            }
-        }
-
-        if (totalAmountTo) {
-            filters.totalAmount = {
-                ...filters.totalAmount,
-                $lte: Number(totalAmountTo),
+                $lte: totalAmountTo,
             }
         }
 
         if (orderDateFrom) {
             filters.createdAt = {
                 ...filters.createdAt,
-                $gte: new Date(orderDateFrom as string),
+                $gte: orderDateFrom,
             }
         }
 
         if (orderDateTo) {
             filters.createdAt = {
                 ...filters.createdAt,
-                $lte: new Date(orderDateTo as string),
+                $lte: orderDateTo,
             }
         }
 
@@ -89,9 +104,9 @@ export const getOrders = async (
             { $unwind: '$products' },
         ]
 
-        if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
+        if (searchText) {
+            const searchRegex = new RegExp(escapeRegExp(searchText), 'i')
+            const searchNumber = Number(searchText)
 
             const searchConditions: any[] = [{ 'products.title': searchRegex }]
 
@@ -108,16 +123,10 @@ export const getOrders = async (
             filters.$or = searchConditions
         }
 
-        const sort: { [key: string]: any } = {}
-
-        if (sortField && sortOrder) {
-            sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
-        }
-
         aggregatePipeline.push(
-            { $sort: sort },
-            { $skip: (Number(page) - 1) * Number(limit) },
-            { $limit: Number(limit) },
+            { $sort: { [sortField]: sortOrder } },
+            { $skip: skip },
+            { $limit: limit },
             {
                 $group: {
                     _id: '$_id',
@@ -133,15 +142,15 @@ export const getOrders = async (
 
         const orders = await Order.aggregate(aggregatePipeline)
         const totalOrders = await Order.countDocuments(filters)
-        const totalPages = Math.ceil(totalOrders / Number(limit))
+        const totalPages = Math.ceil(totalOrders / limit)
 
         res.status(200).json({
             orders,
             pagination: {
                 totalOrders,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: page,
+                pageSize: limit,
             },
         })
     } catch (error) {
@@ -156,11 +165,12 @@ export const getOrdersCurrentUser = async (
 ) => {
     try {
         const userId = res.locals.user._id
-        const { search, page = 1, limit = 5 } = req.query
-        const options = {
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
-        }
+        const { page, limit, skip } = getPagination(
+            req.query.page,
+            req.query.limit,
+            5
+        )
+        const searchText = queryString(req.query.search, 'search')
 
         const user = await User.findById(userId)
             .populate({
@@ -183,19 +193,16 @@ export const getOrdersCurrentUser = async (
 
         let orders = user.orders as unknown as IOrder[]
 
-        if (search) {
-            // если не экранировать то получаем Invalid regular expression: /+1/i: Nothing to repeat
-            const searchRegex = new RegExp(search as string, 'i')
-            const searchNumber = Number(search)
+        if (searchText) {
+            const searchRegex = new RegExp(escapeRegExp(searchText), 'i')
+            const searchNumber = Number(searchText)
             const products = await Product.find({ title: searchRegex })
             const productIds = products.map((product) => product._id)
 
             orders = orders.filter((order) => {
-                // eslint-disable-next-line max-len
                 const matchesProductTitle = order.products.some((product) =>
                     productIds.some((id) => id.equals(product._id))
                 )
-                // eslint-disable-next-line max-len
                 const matchesOrderNumber =
                     !Number.isNaN(searchNumber) &&
                     order.orderNumber === searchNumber
@@ -205,17 +212,17 @@ export const getOrdersCurrentUser = async (
         }
 
         const totalOrders = orders.length
-        const totalPages = Math.ceil(totalOrders / Number(limit))
+        const totalPages = Math.ceil(totalOrders / limit)
 
-        orders = orders.slice(options.skip, options.skip + options.limit)
+        orders = orders.slice(skip, skip + limit)
 
         return res.send({
             orders,
             pagination: {
                 totalOrders,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: page,
+                pageSize: limit,
             },
         })
     } catch (error) {
@@ -289,10 +296,10 @@ export const createOrder = async (
 ) => {
     try {
         const basket: IProduct[] = []
-        const products = await Product.find<IProduct>({})
         const userId = res.locals.user._id
         const { address, payment, phone, total, email, items, comment } =
             req.body
+        const products = await Product.find<IProduct>({ _id: { $in: items } })
 
         items.forEach((id: Types.ObjectId) => {
             const product = products.find((p) => p._id.equals(id))
@@ -315,9 +322,9 @@ export const createOrder = async (
             payment,
             phone,
             email,
-            comment,
+            comment: comment ? sanitizeText(comment) : comment,
             customer: userId,
-            deliveryAddress: address,
+            deliveryAddress: sanitizeText(address),
         })
         const populateOrder = await newOrder.populate(['customer', 'products'])
         await populateOrder.save()
