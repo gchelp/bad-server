@@ -3,96 +3,139 @@ import { FilterQuery } from 'mongoose'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
+import {
+    assertObjectId,
+    getPagination,
+    pickSortField,
+    queryDate,
+    queryNumber,
+    queryString,
+} from '../utils/query'
+import { sanitizeText } from '../utils/sanitize'
 
-// TODO: Добавить guard admin
-// eslint-disable-next-line max-len
-// Get GET /customers?page=2&limit=5&sort=totalAmount&order=desc&registrationDateFrom=2023-01-01&registrationDateTo=2023-12-31&lastOrderDateFrom=2023-01-01&lastOrderDateTo=2023-12-31&totalAmountFrom=100&totalAmountTo=1000&orderCountFrom=1&orderCountTo=10
+const CUSTOMER_SORT_FIELDS = [
+    'createdAt',
+    'totalAmount',
+    'orderCount',
+    'lastOrderDate',
+    'name',
+]
+
+const endOfDay = (date: Date) => {
+    const result = new Date(date)
+    result.setHours(23, 59, 59, 999)
+    return result
+}
+
+// GET /customers?page=2&limit=5&sortField=totalAmount&sortOrder=desc&...
 export const getCustomers = async (
     req: Request,
     res: Response,
     next: NextFunction
 ) => {
     try {
-        const {
-            page = 1,
-            limit = 10,
-            sortField = 'createdAt',
-            sortOrder = 'desc',
-            registrationDateFrom,
-            registrationDateTo,
-            lastOrderDateFrom,
-            lastOrderDateTo,
-            totalAmountFrom,
-            totalAmountTo,
-            orderCountFrom,
-            orderCountTo,
-            search,
-        } = req.query
+        const { page, limit, skip } = getPagination(
+            req.query.page,
+            req.query.limit
+        )
+        const sortField = pickSortField(
+            req.query.sortField,
+            CUSTOMER_SORT_FIELDS
+        )
+        const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1
+
+        const registrationDateFrom = queryDate(
+            req.query.registrationDateFrom,
+            'registrationDateFrom'
+        )
+        const registrationDateTo = queryDate(
+            req.query.registrationDateTo,
+            'registrationDateTo'
+        )
+        const lastOrderDateFrom = queryDate(
+            req.query.lastOrderDateFrom,
+            'lastOrderDateFrom'
+        )
+        const lastOrderDateTo = queryDate(
+            req.query.lastOrderDateTo,
+            'lastOrderDateTo'
+        )
+        const totalAmountFrom = queryNumber(
+            req.query.totalAmountFrom,
+            'totalAmountFrom'
+        )
+        const totalAmountTo = queryNumber(
+            req.query.totalAmountTo,
+            'totalAmountTo'
+        )
+        const orderCountFrom = queryNumber(
+            req.query.orderCountFrom,
+            'orderCountFrom'
+        )
+        const orderCountTo = queryNumber(req.query.orderCountTo, 'orderCountTo')
+        const searchText = queryString(req.query.search, 'search')
 
         const filters: FilterQuery<Partial<IUser>> = {}
 
         if (registrationDateFrom) {
             filters.createdAt = {
                 ...filters.createdAt,
-                $gte: new Date(registrationDateFrom as string),
+                $gte: registrationDateFrom,
             }
         }
 
         if (registrationDateTo) {
-            const endOfDay = new Date(registrationDateTo as string)
-            endOfDay.setHours(23, 59, 59, 999)
             filters.createdAt = {
                 ...filters.createdAt,
-                $lte: endOfDay,
+                $lte: endOfDay(registrationDateTo),
             }
         }
 
         if (lastOrderDateFrom) {
             filters.lastOrderDate = {
                 ...filters.lastOrderDate,
-                $gte: new Date(lastOrderDateFrom as string),
+                $gte: lastOrderDateFrom,
             }
         }
 
         if (lastOrderDateTo) {
-            const endOfDay = new Date(lastOrderDateTo as string)
-            endOfDay.setHours(23, 59, 59, 999)
             filters.lastOrderDate = {
                 ...filters.lastOrderDate,
-                $lte: endOfDay,
+                $lte: endOfDay(lastOrderDateTo),
             }
         }
 
-        if (totalAmountFrom) {
+        if (totalAmountFrom !== undefined) {
             filters.totalAmount = {
                 ...filters.totalAmount,
-                $gte: Number(totalAmountFrom),
+                $gte: totalAmountFrom,
             }
         }
 
-        if (totalAmountTo) {
+        if (totalAmountTo !== undefined) {
             filters.totalAmount = {
                 ...filters.totalAmount,
-                $lte: Number(totalAmountTo),
+                $lte: totalAmountTo,
             }
         }
 
-        if (orderCountFrom) {
+        if (orderCountFrom !== undefined) {
             filters.orderCount = {
                 ...filters.orderCount,
-                $gte: Number(orderCountFrom),
+                $gte: orderCountFrom,
             }
         }
 
-        if (orderCountTo) {
+        if (orderCountTo !== undefined) {
             filters.orderCount = {
                 ...filters.orderCount,
-                $lte: Number(orderCountTo),
+                $lte: orderCountTo,
             }
         }
 
-        if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
+        if (searchText) {
+            const searchRegex = new RegExp(escapeRegExp(searchText), 'i')
             const orders = await Order.find(
                 {
                     $or: [{ deliveryAddress: searchRegex }],
@@ -108,16 +151,10 @@ export const getCustomers = async (
             ]
         }
 
-        const sort: { [key: string]: any } = {}
-
-        if (sortField && sortOrder) {
-            sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
-        }
-
         const options = {
-            sort,
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
+            sort: { [sortField]: sortOrder } as Record<string, 1 | -1>,
+            skip,
+            limit,
         }
 
         const users = await User.find(filters, null, options).populate([
@@ -137,15 +174,15 @@ export const getCustomers = async (
         ])
 
         const totalUsers = await User.countDocuments(filters)
-        const totalPages = Math.ceil(totalUsers / Number(limit))
+        const totalPages = Math.ceil(totalUsers / limit)
 
         res.status(200).json({
             customers: users,
             pagination: {
                 totalUsers,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: page,
+                pageSize: limit,
             },
         })
     } catch (error) {
@@ -153,7 +190,6 @@ export const getCustomers = async (
     }
 }
 
-// TODO: Добавить guard admin
 // Get /customers/:id
 export const getCustomerById = async (
     req: Request,
@@ -161,29 +197,41 @@ export const getCustomerById = async (
     next: NextFunction
 ) => {
     try {
-        const user = await User.findById(req.params.id).populate([
-            'orders',
-            'lastOrder',
-        ])
+        assertObjectId(req.params.id)
+        const user = await User.findById(req.params.id)
+            .populate(['orders', 'lastOrder'])
+            .orFail(
+                () =>
+                    new NotFoundError(
+                        'Пользователь по заданному id отсутствует в базе'
+                    )
+            )
         res.status(200).json(user)
     } catch (error) {
         next(error)
     }
 }
 
-// TODO: Добавить guard admin
-// Patch /customers/:id
+// Patch /customers/:id (разрешены только безопасные поля, роли менять нельзя)
 export const updateCustomer = async (
     req: Request,
     res: Response,
     next: NextFunction
 ) => {
     try {
+        assertObjectId(req.params.id)
+        const { name, phone, email } = req.body
+        const update: { name?: string; phone?: string; email?: string } = {}
+        if (typeof name === 'string') update.name = sanitizeText(name)
+        if (typeof phone === 'string') update.phone = sanitizeText(phone)
+        if (typeof email === 'string') update.email = email
+
         const updatedUser = await User.findByIdAndUpdate(
             req.params.id,
-            req.body,
+            update,
             {
                 new: true,
+                runValidators: true,
             }
         )
             .orFail(
@@ -199,7 +247,6 @@ export const updateCustomer = async (
     }
 }
 
-// TODO: Добавить guard admin
 // Delete /customers/:id
 export const deleteCustomer = async (
     req: Request,
@@ -207,6 +254,7 @@ export const deleteCustomer = async (
     next: NextFunction
 ) => {
     try {
+        assertObjectId(req.params.id)
         const deletedUser = await User.findByIdAndDelete(req.params.id).orFail(
             () =>
                 new NotFoundError(
