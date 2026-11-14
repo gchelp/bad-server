@@ -9,6 +9,7 @@ import {
     updateCurrentUser,
 } from '../controllers/auth'
 import auth from '../middlewares/auth'
+import { issueCsrfToken } from '../middlewares/csrf'
 
 const authRouter = Router()
 
@@ -19,5 +20,6 @@ authRouter.post('/login', login)
 authRouter.get('/token', refreshAccessToken)
 authRouter.get('/logout', logout)
 authRouter.post('/register', register)
+authRouter.get('/csrf-token', issueCsrfToken)
 
 export default authRouter
