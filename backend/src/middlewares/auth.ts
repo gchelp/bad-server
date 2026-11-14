@@ -7,18 +7,17 @@ import NotFoundError from '../errors/not-found-error'
 import UnauthorizedError from '../errors/unauthorized-error'
 import UserModel, { Role } from '../models/user'
 
-// есть файл middlewares/auth.js, в нём мидлвэр для проверки JWT;
-
+// Мидлвэр для проверки JWT access-токена
 const auth = async (req: Request, res: Response, next: NextFunction) => {
-    let payload: JwtPayload | null = null
     const authHeader = req.header('Authorization')
     if (!authHeader?.startsWith('Bearer ')) {
-        throw new UnauthorizedError('Невалидный токен')
+        return next(new UnauthorizedError('Невалидный токен'))
     }
     try {
-        const accessTokenParts = authHeader.split(' ')
-        const aTkn = accessTokenParts[1]
-        payload = jwt.verify(aTkn, ACCESS_TOKEN.secret) as JwtPayload
+        const accessToken = authHeader.split(' ')[1]
+        const payload = jwt.verify(accessToken, ACCESS_TOKEN.secret, {
+            algorithms: ['HS256'],
+        }) as JwtPayload
 
         const user = await UserModel.findOne(
             {
@@ -65,32 +64,36 @@ export function currentUserAccessMiddleware<T>(
     userProperty: keyof T
 ) {
     return async (req: Request, res: Response, next: NextFunction) => {
-        const id = req.params[idProperty]
+        try {
+            const id = req.params[idProperty]
 
-        if (!res.locals.user) {
-            return next(new UnauthorizedError('Необходима авторизация'))
-        }
+            if (!res.locals.user) {
+                return next(new UnauthorizedError('Необходима авторизация'))
+            }
 
-        if (res.locals.user.roles.includes(Role.Admin)) {
+            if (res.locals.user.roles.includes(Role.Admin)) {
+                return next()
+            }
+
+            const entity = await model.findById(id)
+
+            if (!entity) {
+                return next(new NotFoundError('Не найдено'))
+            }
+
+            const userEntityId = entity[userProperty] as Types.ObjectId
+            const hasAccess = new Types.ObjectId(res.locals.user.id).equals(
+                userEntityId
+            )
+
+            if (!hasAccess) {
+                return next(new ForbiddenError('Доступ запрещен'))
+            }
+
             return next()
+        } catch (error) {
+            return next(error)
         }
-
-        const entity = await model.findById(id)
-
-        if (!entity) {
-            return next(new NotFoundError('Не найдено'))
-        }
-
-        const userEntityId = entity[userProperty] as Types.ObjectId
-        const hasAccess = new Types.ObjectId(res.locals.user.id).equals(
-            userEntityId
-        )
-
-        if (!hasAccess) {
-            return next(new ForbiddenError('Доступ запрещен'))
-        }
-
-        return next()
     }
 }
 
