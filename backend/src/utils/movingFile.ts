@@ -1,8 +1,11 @@
-import { existsSync, mkdirSync, rename } from 'fs'
+import { existsSync, mkdirSync, renameSync } from 'fs'
 import { basename, join } from 'path'
 
 function movingFile(imagePath: string, from: string, to: string) {
     const fileName = basename(imagePath)
+    if (!fileName || fileName.startsWith('.')) {
+        throw new Error('Ошибка при сохранении файла')
+    }
     const imagePathTemp = join(from, fileName)
     const imagePathPermanent = join(to, fileName)
 
@@ -11,11 +14,7 @@ function movingFile(imagePath: string, from: string, to: string) {
         throw new Error('Ошибка при сохранении файла')
     }
 
-    rename(imagePathTemp, imagePathPermanent, (err) => {
-        if (err) {
-            throw new Error('Ошибка при сохранении файла')
-        }
-    })
+    renameSync(imagePathTemp, imagePathPermanent)
 }
 
 export default movingFile

@@ -12,6 +12,8 @@ export const { DB_ADDRESS = 'mongodb://127.0.0.1:27017/weblarek' } = process.env
 export const ORIGIN_ALLOW = process.env.ORIGIN_ALLOW || 'http://localhost:5173'
 export const JWT_SECRET = secretOrRandom(process.env.JWT_SECRET)
 export const CSRF_SECRET = secretOrRandom(process.env.CSRF_SECRET)
+export const UPLOAD_PATH = process.env.UPLOAD_PATH || 'images'
+export const UPLOAD_PATH_TEMP = process.env.UPLOAD_PATH_TEMP || 'temp'
 
 export const ACCESS_TOKEN = {
     secret: secretOrRandom(process.env.AUTH_ACCESS_TOKEN_SECRET),

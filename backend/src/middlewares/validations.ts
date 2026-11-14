@@ -3,6 +3,7 @@ import { Types } from 'mongoose'
 
 // Безопасное выражение: без вложенных квантификаторов, длина ограничена
 export const phoneRegExp = /^\+?[\d\s\-()]{5,20}$/
+export const imagePathRegExp = /^\/[\w-]+\/[\w-][\w.-]*$/
 
 export enum PaymentType {
     Card = 'card',
@@ -64,7 +65,7 @@ export const validateProductBody = celebrate({
             'string.empty': 'Поле "title" должно быть заполнено',
         }),
         image: Joi.object().keys({
-            fileName: Joi.string().required().max(200),
+            fileName: Joi.string().required().max(200).pattern(imagePathRegExp),
             originalName: Joi.string().required().max(200),
         }),
         category: Joi.string().required().max(50).messages({
@@ -84,7 +85,7 @@ export const validateProductUpdateBody = celebrate({
             'string.max': 'Максимальная длина поля "name" - 30',
         }),
         image: Joi.object().keys({
-            fileName: Joi.string().required().max(200),
+            fileName: Joi.string().required().max(200).pattern(imagePathRegExp),
             originalName: Joi.string().required().max(200),
         }),
         category: Joi.string().max(50),
