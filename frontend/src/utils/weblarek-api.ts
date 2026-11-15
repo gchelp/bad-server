@@ -30,9 +30,13 @@ export type ApiListResponse<Type> = {
     items: Type[]
 }
 
+const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS']
+
 class Api {
     private readonly baseUrl: string
     protected options: RequestInit
+    private csrfToken: string | null = null
+    private csrfLoading: Promise<string> | null = null
 
     constructor(baseUrl: string, options: RequestInit = {}) {
         this.baseUrl = baseUrl
@@ -53,14 +57,67 @@ class Api {
                   )
     }
 
-    protected async request<T>(endpoint: string, options: RequestInit) {
+    // Токен запрашивается один раз и хранится в памяти.
+    // Парная cookie _csrf выставляется сервером в ответе на этот запрос.
+    private async getCsrfToken(): Promise<string> {
+        if (this.csrfToken) {
+            return this.csrfToken
+        }
+        if (!this.csrfLoading) {
+            this.csrfLoading = fetch(`${this.baseUrl}/auth/csrf-token`, {
+                credentials: 'include',
+            })
+                .then((res) => this.handleResponse<{ csrfToken: string }>(res))
+                .then(({ csrfToken }) => {
+                    this.csrfToken = csrfToken
+                    return csrfToken
+                })
+        }
+        try {
+            return await this.csrfLoading
+        } finally {
+            this.csrfLoading = null
+        }
+    }
+
+    protected async request<T>(
+        endpoint: string,
+        options: RequestInit,
+        isRetry = false
+    ): Promise<T> {
+        const method = (options.method ?? 'GET').toUpperCase()
+        const needsCsrf = !SAFE_METHODS.includes(method)
+        const headers: Record<string, string> = {
+            ...(this.options.headers as Record<string, string>),
+            ...(options.headers as Record<string, string>),
+        }
+        if (needsCsrf) {
+            headers['X-CSRF-Token'] = await this.getCsrfToken()
+        }
+
         try {
             const res = await fetch(`${this.baseUrl}${endpoint}`, {
                 ...this.options,
                 ...options,
+                headers,
+                credentials: 'include',
             })
             return await this.handleResponse<T>(res)
         } catch (error) {
+            const { statusCode, message } = error as {
+                statusCode?: number
+                message?: string
+            }
+            // Токен устарел (например, обновили в другой вкладке): получаем новый и повторяем один раз
+            if (
+                needsCsrf &&
+                !isRetry &&
+                statusCode === 403 &&
+                /csrf/i.test(message ?? '')
+            ) {
+                this.csrfToken = null
+                return this.request<T>(endpoint, options, true)
+            }
             return Promise.reject(error)
         }
     }
